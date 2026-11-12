@@ -1,133 +1,68 @@
 # HelloLineage
 
-**Get LineageOS running on a Motorola phone — replacing Hello UI.**
+Run a **LineageOS GSI** on the **Moto G Power 5G (2024)** the same way [OneLineage](https://github.com/WeWaffles/OneLineage) and [OneOS](https://github.com/fahadalijaved/OneOS) do it on Samsung: as a second system that behaves like the actual OS — boots to its own home screen, runs its own apps — **without flashing anything**. A real-flash route (GSI as the literally-flashed OS) is documented too, for when the bootloader gets unlocked.
 
-Inspired by [WeWaffles/OneLineage](https://github.com/WeWaffles/OneLineage) (the proof-of-concept that hot-switches a Samsung phone into a LineageOS container). This repo is the Motorola-side guide: what works today, what's experimental, and what a Hello UI port of OneLineage would take.
+- **Phone:** Moto G Power 5G 2024, model XT2415, codename `cancunn`, MediaTek Dimensity 7020, running Motorola Hello UI (the skin this device ships with — Motorola's equivalent of what One UI is on Samsung)
+- **Root:** DFRoot (DirtyFrag, CVE-2026-43284) — kernel-module root that works with the **bootloader still locked**, paired with any KernelSU-compatible manager
+- **Goal:** a LineageOS GSI running like the phone's real OS
 
-> **First, a mix-up worth clearing:** Motorola phones don't run One UI — that's Samsung's skin. Motorola's skin is **Hello UI** (formerly My UX). Hence the name: Hello UI -> Lineage. OneLineage as shipped only targets rooted Samsung phones on One UI 8.5.
+## The one-paragraph summary
 
----
+With a locked bootloader you cannot flash any partition — so a GSI cannot be installed the classic way. OneLineage and OneOS work around exactly this on Samsung phones: they stage the GSI image inside `/data` (a normal, writable folder), stop the host's zygote, `pivot_root` into the staged GSI so it becomes the running root filesystem, and start a second Android userspace (its own zygote, system_server, SurfaceFlinger) on top of the same kernel, modem and hardware. Nothing is flashed, so a reboot — or the return script — brings Hello UI straight back. This repo maps that method onto a Motorola device with DFRoot.
 
-## The three routes at a glance
+## Two routes
 
-| | Route | What you do | Difficulty | Calls / SMS | Reversible |
-|---|---|---|---|---|---|
-| 1 | **Official LineageOS build** *(recommended)* | Unlock bootloader, flash the official build made for your exact model | Medium | Yes, fully | Yes — flash stock firmware back |
-| 2 | **LineageOS GSI (Treble)** | Unlock bootloader, flash a generic system image | Medium-hard | Mostly (vendor quirks) | Yes |
-| 3 | **OneLineage-style container** *(research)* | Root + run LineageOS in a pivot container next to Hello UI — nothing flashed | Very hard | **No** (no IMS in the guest) | Yes — it never touches partitions |
+| | Route B — Container (OneLineage method) | Route A — Real flash |
+| --- | --- | --- |
+| Bootloader | stays **locked** | must be **unlocked** (Motorola portal) |
+| How | GSI staged in /data, pivoted as container | GSI written to the system partition via fastbootd |
+| GSI feels like | the OS while it runs; switch back to Hello UI any time | the OS, permanently, with normal boot flow |
+| Calls/SMS in GSI | degraded on the Samsung projects; on Moto expect to iterate | normal |
+| Reversible | yes — nothing is modified on any partition | yes — full firmware restore, but no re-lock |
+| Doc | [docs/ROUTE-B-CONTAINER.md](docs/ROUTE-B-CONTAINER.md) | [docs/ROUTE-A-FLASH-GSI.md](docs/ROUTE-A-FLASH-GSI.md) |
 
----
+With DFRoot in hand, **Route B is the one that works right now** on this phone, and it is what "like how OneOS and OneLineage is" means in practice. Route A is the cleaner end state if you are willing to unlock.
 
-## Route 1 — Official LineageOS build (recommended)
+## What is actually tested (honesty first)
 
-This is the proven, full-replacement path. LineageOS officially supports a long list of Motorola devices.
+- OneLineage itself is a proof of concept, tested **only on rooted Samsung phones** (Galaxy S26 Ultra, base S26, A25 — One UI 8.5 / Android 16). Its README says so and expects porting work for other devices.
+- OneOS (its evolved Kotlin successor) **refuses every non-Samsung phone** at its compatibility check — that is why this repo exists instead of "just use OneOS".
+- No confirmed public report of a GSI (flashed or container) on `cancunn` was found at the time of writing. The device is a standard ARM64 A/B Treble device with dynamic partitions, which is the hardware profile GSIs target, but nobody has published a result yet.
+- So treat Route B on this phone as a **documented port plan with a working template**, not a one-click APK. Expect iteration, logs, and some dead ends. Route A is the boring, well-trodden path on Motorola hardware generally.
 
-### Step 1 — Find your device codename
+## Safety
 
-Look up your exact model (the `XT…` number is in Settings > About phone, and printed on the box). Then check the official device list: **https://wiki.lineageos.org/devices/**
+Both routes can crash, boot-loop the userspace, fill `/data`, or degrade radio features. DFRoot's exploit chain touches the kernel. Before anything:
 
-Popular Motorola devices with official LineageOS builds (check the wiki for the current build status of each):
+1. Back up everything (photos, 2FA tokens, chats).
+2. Remove the screen lock before switching into the container (OneOS documented a guest once taking over the lock-screen hardware slot; the guard exists in their app, but you are not using their app).
+3. Use a phone you can afford to reset. Stock firmware restore for this model is documented in [docs/DEVICE-NOTES.md](docs/DEVICE-NOTES.md).
+4. Never re-lock an unlocked bootloader that is running a GSI.
 
-| Device | Codename |
-|---|---|
-| edge 40 / edge 40 pro (moto X40) | lyriq / rtwo |
-| edge 30 ultra / fusion / neo | eqs / tundra / miami |
-| edge 2021 / edge 20 / edge 2024 | berlna / berlin / avatrn |
-| edge s (moto g100) | nio |
-| moto g84 5G / g82 5G | bangkk / rhodep |
-| moto g stylus 5G (2022) / (2023) | milanf / genevn |
-| moto g stylus 5G | denver |
-| moto g 5G (2024) / moto g 5G | fogo / kiev |
-| moto g 5G plus | nairo |
-| moto g7 / g7 play / g7 plus / g7 power | river / channel / lake / ocean |
-| moto g32 / g42 / g52 | devon / hawao / rhode |
-| moto g10 / g30 | capri / caprip |
-| moto g9 play / g9 power | guamp / cebu |
-| moto g200 5G (Edge S30) | xpeng |
-| moto g4 / g5 / g5s | athene / cedric / montana |
-| moto e7 plus | guam |
-| moto x4 | payton |
-| moto z2 force / z3 | nash / messi |
-| one vision / one action / one zoom | kane / troika / parker |
-| ThinkPhone | bronco |
-| defy (2021) | bathena |
+## Repo map
 
-> The LineageOS wiki warns: devices not listed are **not supported**, builds for other devices **cannot be used**, and "nearly identical" is **not** sufficient. The 2024 model of a phone is not the 2023 model.
+| Path | Contents |
+| --- | --- |
+| `docs/HOW-IT-WORKS.md` | How OneLineage/OneOS actually achieve "GSI running like the actual OS", and how DFRoot makes it possible on a locked Moto |
+| `docs/ROUTE-B-CONTAINER.md` | The main guide: prerequisites, GSI download, porting OneLineage's scripts to `cancunn`, known Motorola-specific issues |
+| `docs/ROUTE-A-FLASH-GSI.md` | Unlock the bootloader and flash the GSI for real (fastbootd, vbmeta, data wipe, restore) |
+| `docs/DEVICE-NOTES.md` | `cancunn` facts: specs, partitions, firmware sources, unlock eligibility, links |
+| `scripts/check-device.sh` | Read-only on-device probe: run it first, it prints everything this repo's guides depend on |
 
-### Step 2 — Unlock the bootloader
-
-Motorola provides an official unlock portal:
-
-1. Enable **Developer options** (tap Build number 7x) and turn on **OEM unlocking** + **USB debugging**.
-2. Boot to fastboot: power off, hold **Vol Down** + power, plug into a PC.
-3. `fastboot oem get_unlock_data` — send the printed string to Motorola's portal: **https://motorola-global-portal.custhelp.com/app/standalone/bootloader**
-4. Motorola emails you an unlock key, then: `fastboot oem unlock UNIQUE_KEY`
-
-**Warnings:** unlocking **wipes all user data**, and it affects warranty. Some carrier-locked models (historically Verizon) can't be unlocked at all.
-
-### Step 3 — Install LineageOS
-
-Follow your device's own page on the LineageOS wiki — it has the exact fastboot/recovery commands for your codename:
-
-1. Flash the LineageOS recovery image(s) (boot / vendor_boot / recovery, per your device page).
-2. Sideload the LineageOS zip: recovery > **Apply update** > **Apply from ADB** > `adb sideload lineage-*.zip`.
-3. (Optional) Sideload **MindTheGapps** right after, if you want the Play Store.
-4. Format data/factory reset when the wiki says so, then reboot.
-
-Full guide format: https://wiki.lineageos.org/devices/ -> your device -> "Installation".
-
-### Step 4 — Rollback (if you ever want Hello UI back)
-
-Flash the stock Motorola firmware for your exact model (Motorola's rescue/agent tool, or the full factory images via fastboot). Firmware is per-model — never flash another model's image.
-
----
-
-## Route 2 — LineageOS GSI (if your model has no official build)
-
-A GSI (Generic System Image) is a Treble system image that runs on any compliant device. This is the closest thing to "OneLineage's LineageOS 23.2 GSI" but installed permanently.
-
-1. **Unlock the bootloader** (same as Route 1 step 2).
-2. **Check Treble support**: install "Treble Info" from Play Store — note your architecture (arm64) and partition style (A/B or A-only).
-3. **Get a LineageOS-based GSI** from a trusted Treble builder — see [TrebleDroid](https://github.com/TrebleDroid) (the maintained phh-Treble lineage; phh's original project lives at [phhusson/treble_experimentations](https://github.com/phhusson/treble_experimentations)). Pick the image type Treble Info recommends (arm64-ab etc.), vanilla or gapps.
-4. Flash (typical pattern — your device's XDA thread has the exact commands):
+## Start here
 
 ```bash
-fastboot flash vbmeta vbmeta.img --disable-verity --disable-verification
-fastboot flash system arm64-ab-lineage.img
-fastboot -w        # wipe data
-fastboot reboot
+adb push check-device.sh /data/local/tmp/
+adb shell su -c "sh /data/local/tmp/check-device.sh" > device-report.txt
 ```
 
-5. **Motorola quirks:** camera, fingerprint, NFC and VoLTE may be broken depending on the vendor blob match. Your device's XDA forum thread is the place to find which GSI variant works best on your exact model.
-
----
-
-## Route 3 — The OneLineage way on Motorola (experimental research)
-
-What [OneLineage](https://github.com/WeWaffles/OneLineage) does on Samsung: it stages a LineageOS 23.2 GSI under `/data/local/tmp`, then **pivot_root's into it as a userspace container with its own zygote and system_server** — no reflashing, no second partition, and it can hand the screen back to One UI. Root required; nothing is permanently modified.
-
-Why it doesn't work on Motorola as-is: its patches are built against **One UI 8.5's** framework files. The good news is that the hard part on Samsung (root) is *easier* on Motorola, because an unlocked Motorola bootloader allows clean permanent Magisk root — no temp-root tricks.
-
-An honest look at what a Hello UI port needs is in **[PORTING.md](PORTING.md)**.
-
-Even on its home turf (S26 Ultra / S26 / A25, One UI 8.5) OneLineage is a proof of concept: voice calls don't work in the guest (no IMS stack), the session can get thrown back to the host after minutes, and developer options crash. The upstream author says support for other devices is extremely limited.
-
----
-
-## Warnings (read before any route)
-
-- **Unlocking wipes your phone.** Back up everything first.
-- **Warranty:** an unlocked bootloader voids Motorola warranty coverage.
-- **Model numbers matter.** A build for `moto g 5G (kiev)` must never go on `moto g 5G plus (nairo)`. Check the XT number twice.
-- **Anti-rollback:** don't downgrade firmware versions below what your device shipped.
-- **Banking/DRM apps** may refuse to run on unlocked/unrooted-flagged devices.
-- Route 3 never flashes anything, but a container can still soft-hang the UI until reboot.
-
----
+Paste the output into an issue if you want help — it answers 90% of the questions.
 
 ## Credits
 
-- [WeWaffles/OneLineage](https://github.com/WeWaffles/OneLineage) — the container hot-switch concept and the inspiration for this repo.
-- [LineageOS](https://wiki.lineageos.org/devices/) — official builds and install guides.
-- [TrebleDroid](https://github.com/TrebleDroid) / [phh-Treble](https://github.com/phhusson/treble_experimentations) — the GSI ecosystem.
-- Motorola's official bootloader unlock portal: https://motorola-global-portal.custhelp.com/app/standalone/bootloader
+- [WeWaffles/OneLineage](https://github.com/WeWaffles/OneLineage) — the original container-GSI proof of concept this repo ports
+- [fahadalijaved/OneOS](https://github.com/fahadalijaved/OneOS) — the productionized Samsung version; much of the behavioral knowledge here comes from their public docs
+- [MisterZtr GSI](https://sourceforge.net/projects/misterztr-gsi/) ([GitHub](https://github.com/MisterZtr/LineageOS_gsi)) — the LineageOS GSI builds OneLineage consumes; the same builds are recommended here
+- [diabl0w/DFRoot](https://github.com/diabl0w/DFRoot) (DirtyFrag, CVE-2026-43284) — locked-bootloader root this device already uses
+- MysticGSI, TrebleDroid/phh — GSI ecosystem
+- LineageOS, Android, Motorola and Samsung are trademarks of their respective owners. Not affiliated with any of them.

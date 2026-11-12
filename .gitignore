@@ -1,0 +1,5 @@
+device-report.txt
+*.img
+*.7z
+*.zip
+out/
